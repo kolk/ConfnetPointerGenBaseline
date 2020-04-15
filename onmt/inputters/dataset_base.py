@@ -21,7 +21,7 @@ def _join_dicts(*args):
     return dict(chain(*[d.items() for d in args]))
 
 
-def _dynamic_dict(example, src_field, tgt_field):
+def _dynamic_dict(example, ques_field, ans_field, tgt_field, max_par_arc_size=20):
     """Create copy-vocab and numericalize with it.
 
     In-place adds ``"src_map"`` to ``example``. That is the copy-vocab
@@ -40,16 +40,88 @@ def _dynamic_dict(example, src_field, tgt_field):
     Returns:
         torchtext.data.Vocab and ``example``, changed as described.
     """
+    #print(example.keys())
+    #print('ans', example["ans"])
+    #print('ques', example["ques"])
+    ans = ans_field.tokenize(example["ans"])
+    if isinstance(example["ques"], str):
+        ques = ques_field.tokenize(example["ques"])
+    else:
+        # confnet
+        ques = example["ques"]
+        ques_weights = example["score"]
+        #example["ques"] = [ques, ques_weights]
 
-    src = src_field.tokenize(example["src"])
+    if isinstance(example["ans"], str):
+        ans = ans_field.tokenize(example["ans"])
+    else:
+        # confnet
+        ans = example["ans"]
+
     # make a small vocab containing just the tokens in the source sequence
-    unk = src_field.unk_token
-    pad = src_field.pad_token
-    src_ex_vocab = Vocab(Counter(src), specials=[unk, pad])
+    unk = ans_field.unk_token
+    pad = ans_field.pad_token
+    assert unk == ques_field.unk_token
+    assert pad == ques_field.pad_token
+
+    """
+    if isinstance(example["ans"], str):
+        src_ex_vocab = Vocab(Counter([w for par_arcs in ques for w in par_arcs ] + ans), specials=[unk, pad])
+        ans_map = [src_ex_vocab.stoi[w] for w in ans]
+    else:
+        src_count = Counter([w for par_arcs in ques for w in par_arcs] + [w for par_arcs in ans for w in par_arcs])
+        src_ex_vocab = Vocab(src_count, specials=[unk, pad])
+        ans_map = torch.LongTensor([[src_ex_vocab.stoi[w] for w in par_arcs] for par_arcs in ques])
+
+    if isinstance(example["ques"], str):
+        if isinstance(example["ans"], str):
+            src_ex_vocab = Vocab(Counter(ques+ans), specials=[unk, pad])
+            ques_map = [src_ex_vocab.stoi[w] for w in ques]
+            ans_map = [src_ex_vocab.stoi[w] for w in ques]
+
+        elif isinstance(example["ans"], list):
+            src_count = Counter(ques + [w for par_arcs in ans for w in par_arcs])
+            src_ex_vocab = Vocab(src_count, specials=[unk, pad])
+
+            ques_map = [[src_ex_vocab.stoi[w]]+[pad]*(max_par_arc_size-1) for w in ques]
+            ans_map = [[src_ex_vocab.stoi[w] for w in par_arcs]+[pad]*(max_par_arc_size-len(par_arcs)) for par_arcs in ans]
+
+    elif isinstance(example["ques"], list):
+        if isinstance(example["ans"], str):
+            src_count = Counter(ans + [w for par_arcs in ques for w in par_arcs])
+            src_ex_vocab = Vocab(src_count, specials=[unk, pad])
+            temp_map = [src_ex_vocab.stoi[w] for w in ans]
+            ans_map = [[src_ex_vocab.stoi[w]] + [src_ex_vocab.stoi[pad]] * (max_par_arc_size - 1) for w in ans]
+            ques_map = [[src_ex_vocab.stoi[w] for w in par_arcs] + [src_ex_vocab.stoi[pad]] * (max_par_arc_size - len(par_arcs)) for
+                       par_arcs in ques]
+
+            ans_map_weights = [[1.0] + [0] * (max_par_arc_size - 1) for w in ans]
+            ques_map_weights =  [[w for w in par_arcs] + [0] * (max_par_arc_size - len(par_arcs)) for
+                       par_arcs in ques_weights]
+    
+        elif isinstance(example["ans"], list):
+            src_count = Counter([w for par_arcs in ques for w in par_arcs] + [w for par_arcs in ans for w in par_arcs])
+            src_ex_vocab = Vocab(src_count, specials=[unk, pad])
+            ans_map = [[src_ex_vocab.stoi[w] for w in par_arcs] + [pad] * (max_par_arc_size - len(par_arcs)) for par_arcs in ans]
+            ques_map = [[src_ex_vocab.stoi[w] for w in par_arcs] + [pad] * (max_par_arc_size - len(par_arcs)) for
+                        par_arcs in ques]
+    """
+
+    src_count = Counter(ans + [w for par_arcs in ques for w in par_arcs])
+    src_ex_vocab = Vocab(src_count, specials=[unk, pad])
+    ans_map = [[src_ex_vocab.stoi[w]] + [src_ex_vocab.stoi[pad]] * (max_par_arc_size - 1) for w in ans]
+    ques_map = [[src_ex_vocab.stoi[w] for w in par_arcs] + [src_ex_vocab.stoi[pad]] * (max_par_arc_size - len(par_arcs))
+                for par_arcs in ques]
+
+    ans_map_weights = [[1.0] + [0] * (max_par_arc_size - 1) for w in ans]
+    ques_map_weights = [[w for w in par_arcs] + [0] * (max_par_arc_size - len(par_arcs)) for
+                        par_arcs in ques_weights]
+
     unk_idx = src_ex_vocab.stoi[unk]
     # Map source tokens to indices in the dynamic dict.
-    src_map = torch.LongTensor([src_ex_vocab.stoi[w] for w in src])
-    example["src_map"] = src_map
+    src_map = torch.cat((torch.LongTensor(ques_map), torch.LongTensor(ans_map)), dim=0)
+    src_map_weights = torch.cat((torch.FloatTensor(ques_map_weights), torch.FloatTensor(ans_map_weights)), dim=0)
+    example["src_map"] = [src_map, src_map_weights]
     example["src_ex_vocab"] = src_ex_vocab
 
     if "tgt" in example:
@@ -109,9 +181,13 @@ class Dataset(TorchtextDataset):
 
     def __init__(self, fields, readers, data, dirs, sort_key,
                  filter_pred=None):
+        #print('fields', fields)
+        #print('readers', readers)
+        #print('dirs', dirs)
         self.sort_key = sort_key
         can_copy = 'src_map' in fields and 'alignment' in fields
 
+        #print('can_copy', can_copy)
         read_iters = [r.read(dat[1], dat[0], dir_) for r, dat, dir_
                       in zip(readers, data, dirs)]
 
@@ -119,16 +195,30 @@ class Dataset(TorchtextDataset):
         self.src_vocabs = []
         examples = []
         for ex_dict in starmap(_join_dicts, zip(*read_iters)):
+            #print('qields ques', ex_dict)
             if can_copy:
-                src_field = fields['src']
+                ques_field = fields['ques']
+                ans_field = fields['ans']
                 tgt_field = fields['tgt']
                 # this assumes src_field and tgt_field are both text
                 src_ex_vocab, ex_dict = _dynamic_dict(
-                    ex_dict, src_field.base_field, tgt_field.base_field)
+                    ex_dict, ques_field.base_field, ans_field.base_field, tgt_field.base_field)
                 self.src_vocabs.append(src_ex_vocab)
+
             ex_fields = {k: [(k, v)] for k, v in fields.items() if
                          k in ex_dict}
+
+            ########## HACK ##############
+            #ex_dict["ques"] = [ex_dict["ques"], ex_dict["scores"]]
+            #############################
+            #print(ex_fields)
+            #print(ex_dict)
+            #ex_fields["src_map_weights"] = ex_dict["src_map_weights"]
             ex = Example.fromdict(ex_dict, ex_fields)
+            #scores_dict = {k: [(k, v)] for k, v in fields.items() if k == "scores"}
+            #ex_temp = Example.fromdict(scores_dict, ex_fields)
+            #print(ex.ques)
+            #print(ex.ans)
             examples.append(ex)
 
         # fields needs to have only keys that examples have as attrs

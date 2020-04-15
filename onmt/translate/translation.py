@@ -3,6 +3,7 @@ from __future__ import unicode_literals, print_function
 
 import torch
 from onmt.inputters.text_dataset import TextMultiField
+from onmt.inputters.lattice_dataset import LatticeMultiField
 from onmt.utils.alignment import build_align_pharaoh
 
 
@@ -26,14 +27,16 @@ class TranslationBuilder(object):
                  has_tgt=False, phrase_table=""):
         self.data = data
         self.fields = fields
-        self._has_text_src = isinstance(
-            dict(self.fields)["src"], TextMultiField)
+        self._has_text_ans = isinstance(
+            dict(self.fields)["ans"], TextMultiField)
+        self._has_lattice_ques = isinstance(
+            dict(self.fields)["ques"], LatticeMultiField)
         self.n_best = n_best
         self.replace_unk = replace_unk
         self.phrase_table = phrase_table
         self.has_tgt = has_tgt
 
-    def _build_target_tokens(self, src, src_vocab, src_raw, pred, attn):
+    def _build_target_tokens(self, ques, ans, src_vocab, ques_raw, ans_raw, pred, attn):
         tgt_field = dict(self.fields)["tgt"].base_field
         vocab = tgt_field.vocab
         tokens = []
@@ -45,15 +48,24 @@ class TranslationBuilder(object):
             if tokens[-1] == tgt_field.eos_token:
                 tokens = tokens[:-1]
                 break
-        if self.replace_unk and attn is not None and src is not None:
+        if self.replace_unk and attn is not None and ques is not None and ans is not None:
             for i in range(len(tokens)):
                 if tokens[i] == tgt_field.unk_token:
-                    _, max_index = attn[i][:len(src_raw)].max(0)
-                    tokens[i] = src_raw[max_index.item()]
+                    len_src_raw = len(ques_raw)+len(ans_raw)
+                    _, max_index = attn[i][:len_src_raw].max(0)
+                    #########################
+                    if max_index < len(ques_raw):
+                        ###########33 need to change for confnet self-attention ##################
+                        tokens[i] = ques_raw[max_index.item()][0]
+                    else:
+                        tokens[i] = ans_raw[max_index.item()-len(ques_raw)]
+                    #tokens[i] = src_raw[max_index.item()]
+                    ###############################
                     if self.phrase_table != "":
+                        src_raw = ques_raw + [[w] for w in ans_raw]
                         with open(self.phrase_table, "r") as f:
                             for line in f:
-                                if line.startswith(src_raw[max_index.item()]):
+                                if line.startswith(src_raw[max_index.item()][0]):
                                     tokens[i] = line.split('|||')[1].strip()
         return tokens
 
@@ -77,37 +89,49 @@ class TranslationBuilder(object):
 
         # Sorting
         inds, perm = torch.sort(batch.indices)
-        if self._has_text_src:
-            src = batch.src[0][:, :, 0].index_select(1, perm)
+        if self._has_text_ans:
+            #print('ans size', batch.ans[0].size())
+            ans = batch.ans[0][:, :, 0].index_select(1, perm)
+            ques = batch.ques[0][:, :, :, 0].index_select(0, perm)
         else:
-            src = None
+            ques = None
+            ans = None
         tgt = batch.tgt[:, :, 0].index_select(1, perm) \
             if self.has_tgt else None
 
         translations = []
         for b in range(batch_size):
-            if self._has_text_src:
+            if self._has_text_ans:
                 src_vocab = self.data.src_vocabs[inds[b]] \
                     if self.data.src_vocabs else None
-                src_raw = self.data.examples[inds[b]].src[0]
+                ans_raw = self.data.examples[inds[b]].ans[0]
+                ques_raw = self.data.examples[inds[b]].ques[0]
             else:
                 src_vocab = None
-                src_raw = None
+                ques_raw = None
+                ans_raw = None
             pred_sents = [self._build_target_tokens(
-                src[:, b] if src is not None else None,
-                src_vocab, src_raw,
+                ques[b, :, :] if ques is not None else None,
+                ans[:, b] if ans is not None else None,
+                src_vocab, ques_raw, ans_raw,
                 preds[b][n], attn[b][n])
                 for n in range(self.n_best)]
+            print('ques', [par_arcs[0] for par_arcs in ques_raw if par_arcs[0] != '*DELETE*' and par_arcs[0] != '[noise]'])
+            print('ans', [w for w in ans_raw if w != '<blank>'])
+            print('pred_sent', pred_sents)
             gold_sent = None
             if tgt is not None:
                 gold_sent = self._build_target_tokens(
-                    src[:, b] if src is not None else None,
-                    src_vocab, src_raw,
+                    ques[b, :, :] if ques is not None else None,
+                    ans[:, b] if ans is not None else None,
+                    src_vocab, ques_raw, ans_raw,
                     tgt[1:, b] if tgt is not None else None, None)
-
+            print('gold_sent', gold_sent)
+            print('******************')
             translation = Translation(
-                src[:, b] if src is not None else None,
-                src_raw, pred_sents, attn[b], pred_score[b],
+                ques[b, :, :] if ques is not None else None,
+                ans[:, b] if ans is not None else None,
+                ques_raw, ans_raw, pred_sents, attn[b], pred_score[b],
                 gold_sent, gold_score[b], align[b]
             )
             translations.append(translation)
@@ -131,13 +155,15 @@ class Translation(object):
             each translation.
     """
 
-    __slots__ = ["src", "src_raw", "pred_sents", "attns", "pred_scores",
+    __slots__ = ["ques", "ans", "ques_raw", "ans_raw", "pred_sents", "attns", "pred_scores",
                  "gold_sent", "gold_score", "word_aligns"]
 
-    def __init__(self, src, src_raw, pred_sents,
+    def __init__(self, ques, ans, ques_raw, ans_raw, pred_sents,
                  attn, pred_scores, tgt_sent, gold_score, word_aligns):
-        self.src = src
-        self.src_raw = src_raw
+        self.ques = ques
+        self.ans = ans
+        self.ques_raw = ques_raw
+        self.ans_raw = ans_raw
         self.pred_sents = pred_sents
         self.attns = attn
         self.pred_scores = pred_scores
@@ -150,7 +176,7 @@ class Translation(object):
         Log translation.
         """
 
-        msg = ['\nSENT {}: {}\n'.format(sent_number, self.src_raw)]
+        msg = ['\nSENT {}: {}\n {}\n**************'.format(sent_number, self.ques_raw, self.ans_raw)]
 
         best_pred = self.pred_sents[0]
         best_score = self.pred_scores[0]

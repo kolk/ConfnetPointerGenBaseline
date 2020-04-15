@@ -107,7 +107,7 @@ class ModelSaver(ModelSaverBase):
         # were not originally here.
 
         vocab = deepcopy(self.fields)
-        for side in ["src", "tgt"]:
+        for side in ["ques", "ans", "tgt"]:
             keys_to_pop = []
             if hasattr(vocab[side], "fields"):
                 unk_token = vocab[side].fields[0][1].vocab.itos[0]

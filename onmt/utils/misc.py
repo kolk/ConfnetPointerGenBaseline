@@ -5,7 +5,7 @@ import random
 import inspect
 from itertools import islice, repeat
 import os
-
+from onmt.inputters.lattice_dataset import LatticeDataReader
 
 def split_corpus(path, shard_size, default=None):
     """yield a `list` containing `shard_size` line of `path`,
@@ -30,6 +30,28 @@ def _split_corpus(path, shard_size):
                     break
                 yield shard
 
+def _split_corpus_confnet(path, shard_size):
+    all_confnets = []
+    paths = os.listdir(path)
+    if len(paths) <= shard_size:
+        for fl in paths:
+            print(fl)
+            p = os.path.join(path, fl)
+            if os.path.isdir(p):
+                continue
+            confnet, scores, lens = LatticeDataReader.read_confnet_file(p)
+            all_confnets.append([confnet, scores, lens])
+        yield all_confnets
+    else:
+            confnets = []
+            for i, fl in enumerate(paths):
+                p = os.path.join(path, fl)
+                text, scores, lens = LatticeDataReader.read_confnet_file(p)
+                shard.append([text, scores, lens])
+                if (i+1)%shard_size == 0:
+                    shard = confnets
+                    confnets = []
+                    yield shard
 
 def aeq(*args):
     """

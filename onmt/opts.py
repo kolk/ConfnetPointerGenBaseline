@@ -60,7 +60,7 @@ def model_opts(parser):
     # Encoder-Decoder Options
     group = parser.add_argument_group('Model- Encoder-Decoder')
     group.add('--model_type', '-model_type', default='text',
-              choices=['text', 'img', 'audio', 'vec'],
+              choices=['text', 'img', 'audio', 'vec', 'lattice'],
               help="Type of source model to use. Allows "
                    "the system to incorporate non-text inputs. "
                    "Options are [text|img|audio|vec].")
@@ -218,8 +218,12 @@ def preprocess_opts(parser):
               help="Path(s) to the training src-tgt alignment")
     group.add('--train_ids', '-train_ids', nargs='+', default=[None],
               help="ids to name training shards, used for corpus weighting")
+    group.add('--train_confnet', '-train_confnet', required=True, nargs='+',
+              help="Path(s) to the training source confnet data")
 
     group.add('--valid_src', '-valid_src',
+              help="Path to the validation source data")
+    group.add('--valid_confnet', '-valid_confnet',
               help="Path to the validation source data")
     group.add('--valid_tgt', '-valid_tgt',
               help="Path to the validation target data")
@@ -261,6 +265,9 @@ def preprocess_opts(parser):
     group.add('--tgt_vocab', '-tgt_vocab', default="",
               help="Path to an existing target vocabulary. Format: "
                    "one word per line.")
+    group.add('--confnet_vocab', '-confnet_vocab', default="",
+              help="Path to an existing confnet vocabulary. Format: "
+                   "one word per line.")
     group.add('--features_vocabs_prefix', '-features_vocabs_prefix',
               type=str, default='',
               help="Path prefix to existing features vocabularies")
@@ -268,6 +275,8 @@ def preprocess_opts(parser):
               help="Size of the source vocabulary")
     group.add('--tgt_vocab_size', '-tgt_vocab_size', type=int, default=50000,
               help="Size of the target vocabulary")
+    group.add('--confnet_vocab_size', '-confnet_vocab_size', type=int, default=50000,
+              help="Size of the confnet vocabulary")
     group.add('--vocab_size_multiple', '-vocab_size_multiple',
               type=int, default=1,
               help="Make the vocabulary size a multiple of this value")
@@ -276,6 +285,8 @@ def preprocess_opts(parser):
               '-src_words_min_frequency', type=int, default=0)
     group.add('--tgt_words_min_frequency',
               '-tgt_words_min_frequency', type=int, default=0)
+    group.add('--confnet_words_min_frequency',
+              '-confnet_words_min_frequency', type=int, default=0)
 
     group.add('--dynamic_dict', '-dynamic_dict', action='store_true',
               help="Create dynamic dictionaries")
@@ -294,6 +305,10 @@ def preprocess_opts(parser):
     group.add('--tgt_seq_length_trunc', '-tgt_seq_length_trunc',
               type=int, default=None,
               help="Truncate target sequence length.")
+    group.add('--confnet_seq_length', '-confnet_seq_length', type=int, default=50,
+              help="Maximum confnet sequence length to keep.")
+    group.add('--confnet_seq_length_trunc', '-confnet_seq_length_trunc',
+              type=int, default=None, help="Truncate confnet sequence length.")
     group.add('--lower', '-lower', action='store_true', help='lowercase data')
     group.add('--filter_valid', '-filter_valid', action='store_true',
               help='Filter validation data by src and/or tgt length')
@@ -609,6 +624,8 @@ def translate_opts(parser):
                    "sequence)")
     group.add('--src_dir', '-src_dir', default="",
               help='Source directory for image or audio files')
+    group.add('--confnet', '-confnet_', default="",
+              help='Source confnet files')
     group.add('--tgt', '-tgt',
               help='True target sequence (optional)')
     group.add('--shard_size', '-shard_size', type=int, default=10000,

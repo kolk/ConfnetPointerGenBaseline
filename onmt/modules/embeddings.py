@@ -86,6 +86,39 @@ class VecEmbedding(nn.Module):
         assert not file
 
 
+
+class FixedEmbedding(nn.Embedding):
+    def __init__(self, vec_size,
+                 emb_dim,
+                 position_encoding=False,
+                 dropout=0):
+        super(VecEmbedding, self).__init__()
+        self.embedding_size = emb_dim
+        self.proj = nn.Linear(vec_size, emb_dim, bias=False)
+        self.word_padding_idx = 0  # vector seqs are zero-padded
+        self.position_encoding = position_encoding
+
+        if self.position_encoding:
+            self.pe = PositionalEncoding(dropout, self.embedding_size)
+
+    def forward(self, x, step=None):
+        """
+        Args:
+            x (FloatTensor): input, ``(len, batch, 1, vec_feats)``.
+
+        Returns:
+            FloatTensor: embedded vecs ``(len, batch, embedding_size)``.
+        """
+        x = self.proj(x).squeeze(2)
+        if self.position_encoding:
+            x = self.pe(x, step=step)
+
+        return x
+
+    def load_pretrained_vectors(self, file):
+        assert not file
+
+
 class Embeddings(nn.Module):
     """Words embeddings for encoder/decoder.
 
@@ -257,7 +290,7 @@ class Embeddings(nn.Module):
             else:
                 self.word_lut.weight.data.copy_(pretrained)
 
-    def forward(self, source, step=None):
+    def forward(self, source, step=None, isSequential=True):
         """Computes the embeddings for words and features.
 
         Args:
@@ -274,7 +307,8 @@ class Embeddings(nn.Module):
                 else:
                     source = module(source)
         else:
-            source = self.make_embedding(source)
+                source = self.make_embedding(source)
+
 
         return source
 

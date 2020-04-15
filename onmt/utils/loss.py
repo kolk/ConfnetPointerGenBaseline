@@ -106,6 +106,9 @@ class LossComputeBase(nn.Module):
         """
         return NotImplementedError
 
+    def print_output(self, train, output, target, **kwargs):
+        return NotImplementedError
+
     def _compute_loss(self, batch, output, target, **kwargs):
         """
         Compute the loss. Subclass must define this method.
@@ -126,7 +129,9 @@ class LossComputeBase(nn.Module):
                  normalization=1.0,
                  shard_size=0,
                  trunc_start=0,
-                 trunc_size=None):
+                 trunc_size=None,
+                 vocab=None,
+                 train=True):
         """Compute the forward loss, possibly in shards in which case this
         method also runs the backward pass and returns ``None`` as the loss
         value.
@@ -154,14 +159,30 @@ class LossComputeBase(nn.Module):
         Returns:
             A tuple with the loss and a :obj:`onmt.utils.Statistics` instance.
         """
+
+        ################33
+        """
+        if vocab is not None:
+            voc = vocab["ans"].base_field.vocab
+            for sent, slen, par_arc_sz, a, t in zip(batch.ques[0].squeeze(-1), batch.ques[1], batch.ques[2],
+                                                    batch.ans[0].squeeze(-1).permute(1, 0),
+                                                    batch.tgt.squeeze(-1).permute(1, 0)):
+                for i, par_arcs in enumerate(sent):
+                    if i < slen:
+                        print([voc.itos[w.item()] for w in par_arcs])
+                print([voc.itos[w.item()] for w in a], [voc.itos[w.item()] for w in t])
+                print('***************')
+        """
+        ###############
         if trunc_size is None:
             trunc_size = batch.tgt.size(0) - trunc_start
         trunc_range = (trunc_start, trunc_start + trunc_size)
         shard_state = self._make_shard_state(batch, output, trunc_range, attns)
         if shard_size == 0:
-            loss, stats = self._compute_loss(batch, **shard_state)
+            loss, stats = self._compute_loss(batch, **shard_state, train=train)
             return loss / float(normalization), stats
         batch_stats = onmt.utils.Statistics()
+
         for shard in shards(shard_state, shard_size):
             loss, stats = self._compute_loss(batch, **shard)
             loss.div(float(normalization)).backward()
@@ -275,6 +296,49 @@ class NMTLossCompute(LossComputeBase):
             })
         return shard_state
 
+
+    def print_output(self, train, output, target, source, answer):
+        scores = self.generator(self._bottle(output))
+        gtruth = target.view(-1)
+        l, b_sz = target.size()
+        l_src, b_sz_src = source.size()
+        l_ans, b_sz_ans = answer.size()
+
+        assert b_sz == b_sz_src
+        assert b_sz == b_sz_ans
+
+        if not train:
+            pred = scores.data.max(1)[1]
+            gtruth_data = target.view(-1).data
+            src_data = source.view(-1).data
+            ans_data = answer.view(-1).data
+
+            pred = pred.view(l, b_sz)
+            gtruth_data = gtruth_data.view(l, b_sz)
+            src_data = src_data.view(l_src, b_sz_src)
+            ans_data = ans_data.view(l_ans, b_sz_ans)
+
+            for i in range(b_sz):
+                b_sent = []
+                b_sent_pred = []
+                b_sent_src = []
+                b_sent_ans = []
+
+                for j in range(l):
+                    b_sent.append(self.tgt_vocab.itos[gtruth_data[j][i]])
+                    b_sent_pred.append(self.tgt_vocab.itos[pred[j][i]])
+
+                for j in range(l_ans):
+                    b_sent_ans.append(self.src_vocab.itos[ans_data[j][i]])
+                for j in range(l_src):
+                    b_sent_src.append(self.src_vocab.itos[src_data[j][i]])
+
+                print("question: " + " ".join(b_sent_src))
+                print("Answer: " + " ".join(b_sent_ans))
+                print("groundtruth: " + " ".join(b_sent))
+                print("prediction: " + " ".join(b_sent_pred))
+                print("\n\n")
+
     def _compute_loss(self, batch, output, target, std_attn=None,
                       coverage_attn=None, align_head=None, ref_align=None):
 
@@ -320,7 +384,6 @@ def filter_shard_state(state, shard_size=None):
     for k, v in state.items():
         if shard_size is None:
             yield k, v
-
         if v is not None:
             v_split = []
             if isinstance(v, torch.Tensor):

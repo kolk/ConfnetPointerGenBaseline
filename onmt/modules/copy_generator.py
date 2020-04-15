@@ -202,7 +202,7 @@ class CopyGeneratorLossCompute(NMTLossCompute):
         return shard_state
 
     def _compute_loss(self, batch, output, target, copy_attn, align,
-                      std_attn=None, coverage_attn=None):
+                      std_attn=None, coverage_attn=None, train=True):
         """Compute the loss.
 
         The args must match :func:`self._make_shard_state()`.
@@ -233,6 +233,7 @@ class CopyGeneratorLossCompute(NMTLossCompute):
             batch, self.tgt_vocab, None)
         scores_data = self._bottle(scores_data)
 
+        #self.print_output(train, scores_data, batch, output, target, self.tgt_vocab)
         # this block does not depend on the loss value computed above
         # and is used only for stats
         # Correct target copy token instead of <unk>
@@ -244,6 +245,7 @@ class CopyGeneratorLossCompute(NMTLossCompute):
         offset_align = align[correct_mask] + len(self.tgt_vocab)
         target_data[correct_mask] += offset_align
 
+        self.print_output(train, scores_data, batch, output, target_data, self.tgt_vocab)
         # Compute sum of perplexities for stats
         stats = self._stats(loss.sum().clone(), scores_data, target_data)
 
@@ -259,3 +261,67 @@ class CopyGeneratorLossCompute(NMTLossCompute):
             loss = loss.sum()
 
         return loss, stats
+
+
+    def print_output(self, train, scores, batch, output, target, tgt_vocab):
+        gtruth = target.clone()
+        batch_sz = batch.batch_size
+        l, b_sz = target.view(-1, batch_sz).size()
+        b_sz_src, l_src, max_par_arcs = batch.ques[0].squeeze(-1).size()
+        l_ans, b_sz_ans = batch.ans[0].squeeze(-1).size()
+
+        assert batch_sz == b_sz_src
+        assert batch_sz == b_sz_ans
+        assert batch_sz == b_sz
+
+        if not train:
+            pred = scores.max(1)[1]
+            pred = pred.view(l, batch_sz)
+            src_data = batch.ques[0].squeeze(-1).data
+            ans_data = batch.ans[0].squeeze(-1).data
+            gtruth_data = target.view(l, batch_sz).data
+
+            for i in range(b_sz):
+                b_sent = []
+                b_sent_pred = []
+                b_sent_src = []
+                b_sent_ans = []
+                src_vocab = batch.src_ex_vocab[i]
+
+                for j in range(l_src):
+                    tok = src_data[i][j][0].item()
+                    if tok < len(tgt_vocab):
+                        b_sent_src.append(tgt_vocab.itos[tok])
+                    else:
+                        b_sent_src.append(src_vocab.itos[tok - len(tgt_vocab)])
+                    #b_sent_src.append(tgt_vocab.itos[src_data[i][j][0].item()])
+                print("question: " + " ".join(b_sent_src))
+
+                for j in range(l_ans):
+                    if tgt_vocab.itos[ans_data[j][i].item()] == '</s>':
+                        break
+                    tok = ans_data[j][i].item()
+                    if tok < len(tgt_vocab):
+                        b_sent_ans.append(tgt_vocab.itos[ans_data[j][i].item()])
+                    else:
+                        b_sent_ans.append(src_vocab.itos[tok - len(tgt_vocab)])
+                    #b_sent_ans.append(tgt_vocab.itos[ans_data[j][i].item()])
+                print("Answer: " + " ".join(b_sent_ans))
+
+                for j in range(l):
+                    tok = gtruth_data[j][i].item()
+                    if tok < len(tgt_vocab):
+                        b_sent.append(tgt_vocab.itos[gtruth_data[j][i].item()])
+                    else:
+                        b_sent.append(src_vocab.itos[tok - len(tgt_vocab)])
+                print("groundtruth: " + " ".join(b_sent))
+
+                for j in range(l):
+                    tok = pred[j][i].item()
+                    if tok < len(tgt_vocab):
+                        b_sent_pred.append(tgt_vocab.itos[pred[j][i].item()])
+                    else:
+                        b_sent_pred.append(src_vocab.itos[tok - len(tgt_vocab)])
+                print("prediction: " + " ".join(b_sent_pred))
+
+                print("\n\n")

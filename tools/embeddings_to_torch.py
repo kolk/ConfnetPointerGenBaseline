@@ -4,15 +4,16 @@ from __future__ import division
 import six
 import argparse
 import torch
+import sys
+sys.path.append('..')
 from onmt.utils.logging import init_logger, logger
 from onmt.inputters.inputter import _old_style_vocab
-
 
 def get_vocabs(dict_path):
     fields = torch.load(dict_path)
 
     vocs = []
-    for side in ['src', 'tgt']:
+    for side in ['ques', 'ans', 'tgt']:
         if _old_style_vocab(fields):
             vocab = next((v for n, v in fields if n == side), None)
         else:
@@ -21,13 +22,16 @@ def get_vocabs(dict_path):
             except AttributeError:
                 vocab = fields[side].vocab
         vocs.append(vocab)
-    enc_vocab, dec_vocab = vocs
+    ques_vocab, ans_vocab, dec_vocab = vocs
+
+    assert ques_vocab == ans_vocab
 
     logger.info("From: %s" % dict_path)
-    logger.info("\t* source vocab: %d words" % len(enc_vocab))
+    logger.info("\t* ques vocab: %d words" % len(ques_vocab))
+    logger.info("\t* ans vocab: %d words" % len(ans_vocab))
     logger.info("\t* target vocab: %d words" % len(dec_vocab))
 
-    return enc_vocab, dec_vocab
+    return ques_vocab, dec_vocab
 
 
 def read_embeddings(file_enc, skip_lines=0, filter_set=None):

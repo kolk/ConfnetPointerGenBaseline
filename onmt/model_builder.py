@@ -64,7 +64,7 @@ def build_embeddings(opt, text_field, for_encoder=True):
     return emb
 
 
-def build_encoder(opt, embeddings):
+def build_encoder(opt, ques_embeddings, ans_embeddings=None):
     """
     Various encoder dispatcher function.
     Args:
@@ -73,7 +73,9 @@ def build_encoder(opt, embeddings):
     """
     enc_type = opt.encoder_type if opt.model_type == "text" \
         or opt.model_type == "vec" else opt.model_type
-    return str2enc[enc_type].from_opt(opt, embeddings)
+    if opt.model_type == "lattice":
+        return str2enc["lattice"].from_opt(opt, ques_embeddings), str2enc[opt.encoder_type].from_opt(opt, ans_embeddings)
+    return str2enc[enc_type].from_opt(opt, ques_embeddings)
 
 
 def build_decoder(opt, embeddings):
@@ -139,14 +141,19 @@ def build_base_model(model_opt, fields, gpu, checkpoint=None, gpu_id=None):
         model_opt.attention_dropout = model_opt.dropout
 
     # Build embeddings.
-    if model_opt.model_type == "text" or model_opt.model_type == "vec":
-        src_field = fields["src"]
-        src_emb = build_embeddings(model_opt, src_field)
+    if model_opt.model_type == "text" or model_opt.model_type == "vec" or model_opt.model_type == "lattice":
+        ans_field = fields["ans"]
+        ans_emb = build_embeddings(model_opt, ans_field)
+
+        ques_field = fields["ques"]
+        ques_emb = build_embeddings(model_opt, ques_field)
     else:
-        src_emb = None
+        ques_emb = None
+        ans_emb = None
 
     # Build encoder.
-    encoder = build_encoder(model_opt, src_emb)
+    ques_encoder, ans_encoder = build_encoder(model_opt, ques_emb, ans_emb)
+    #ans_encoder = build_encoder(model_opt, ans_emb)
 
     # Build decoder.
     tgt_field = fields["tgt"]
@@ -155,10 +162,13 @@ def build_base_model(model_opt, fields, gpu, checkpoint=None, gpu_id=None):
     # Share the embedding matrix - preprocess with share_vocab required.
     if model_opt.share_embeddings:
         # src/tgt vocab should be the same if `-share_vocab` is specified.
-        assert src_field.base_field.vocab == tgt_field.base_field.vocab, \
+        #print('ques vocab == tgt vocab', ques_field.base_field.vocab == tgt_field.base_field.vocab)
+        #print('ans vocab == ', ans_field.base_field.vocab == ques_field.base_field.vocab)
+        assert ques_field.base_field.vocab == tgt_field.base_field.vocab == ans_field.base_field.vocab, \
             "preprocess with -share_vocab if you use share_embeddings"
 
-        tgt_emb.word_lut.weight = src_emb.word_lut.weight
+        ########### TO-DO ################3
+        tgt_emb.word_lut.weight = ques_emb.word_lut.weight
 
     decoder = build_decoder(model_opt, tgt_emb)
 
@@ -169,7 +179,7 @@ def build_base_model(model_opt, fields, gpu, checkpoint=None, gpu_id=None):
         device = torch.device("cuda")
     elif not gpu:
         device = torch.device("cpu")
-    model = onmt.models.NMTModel(encoder, decoder)
+    model = onmt.models.NMTModel(ques_encoder, ans_encoder, decoder, ques_field.base_field.vocab)
 
     # Build Generator.
     if not model_opt.copy_attn:
@@ -223,8 +233,11 @@ def build_base_model(model_opt, fields, gpu, checkpoint=None, gpu_id=None):
                 if p.dim() > 1:
                     xavier_uniform_(p)
 
-        if hasattr(model.encoder, 'embeddings'):
-            model.encoder.embeddings.load_pretrained_vectors(
+        if hasattr(model.ans_encoder, 'embeddings'):
+            model.ans_encoder.embeddings.load_pretrained_vectors(
+                model_opt.pre_word_vecs_enc)
+        if hasattr(model.ques_encoder, 'embeddings'):
+            model.ques_encoder.embeddings.load_pretrained_vectors(
                 model_opt.pre_word_vecs_enc)
         if hasattr(model.decoder, 'embeddings'):
             model.decoder.embeddings.load_pretrained_vectors(

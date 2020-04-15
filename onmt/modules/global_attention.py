@@ -224,4 +224,5 @@ class GlobalAttention(nn.Module):
             aeq(batch, batch_)
             aeq(source_l, source_l_)
 
+
         return attn_h, align_vectors

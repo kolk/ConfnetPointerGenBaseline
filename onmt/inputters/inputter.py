@@ -17,6 +17,7 @@ from onmt.inputters.text_dataset import text_fields, TextMultiField
 from onmt.inputters.image_dataset import image_fields
 from onmt.inputters.audio_dataset import audio_fields
 from onmt.inputters.vec_dataset import vec_fields
+from onmt.inputters.lattice_dataset import lattice_fields
 from onmt.utils.logging import logger
 # backwards compatibility
 from onmt.inputters.text_dataset import _feature_tokenize  # noqa: F401
@@ -41,6 +42,8 @@ Vocab.__setstate__ = _setstate
 
 
 def make_src(data, vocab):
+    #print('make_src')
+    #print('data size', data.size())
     src_size = max([t.size(0) for t in data])
     src_vocab_size = max([t.max() for t in data]) + 1
     alignment = torch.zeros(src_size, len(data), src_vocab_size)
@@ -49,6 +52,33 @@ def make_src(data, vocab):
             alignment[j, i, t] = 1
     return alignment
 
+def make_src_confnet(data, vocab):
+    """ src_map contains  2 matrices, map and weights"""
+    #print('make_src_confnet')
+    #print('data size', len(data))
+    weights = []
+    data_ = []
+    for samp in data:
+        weights.append(samp[1])
+        data_.append(samp[0])
+    #print('weights', weights)
+    #print('data', data_)
+    #batch, slen, max_par_arc = data.size()
+
+    """
+    for i, samp in enumerate(data_):
+        for j, par_arcs in enumerate(samp):
+            print(j, [w.item() for w in par_arcs if w!=1])
+        print('!!!!!!!!!!!!!!!!')
+    """
+
+    src_size = max([t.size(0) for t in data_])
+    src_vocab_size = max([p.max() for t in data_ for p in t]) + 1
+    alignment = torch.zeros(src_size, len(data_), src_vocab_size) #slen, batch, vocab
+    for i, (sent, sent_weights) in enumerate(zip(data_, weights)):
+        for j, (t, w) in enumerate(zip(sent, sent_weights)):
+            alignment[j, i, t] = w
+    return alignment
 
 def make_tgt(data, vocab):
     tgt_size = max([t.size(0) for t in data])
@@ -100,14 +130,16 @@ def parse_align_idx(align_pharaoh):
 
 def get_fields(
     src_data_type,
-    n_src_feats,
+    n_ans_feats,
+    n_ques_feats,
     n_tgt_feats,
     pad='<blank>',
     bos='<s>',
     eos='</s>',
     dynamic_dict=False,
     with_align=False,
-    src_truncate=None,
+    ans_truncate=None,
+    ques_truncate=None,
     tgt_truncate=None
 ):
     """
@@ -136,23 +168,31 @@ def get_fields(
         the dataset example attributes.
     """
 
-    assert src_data_type in ['text', 'img', 'audio', 'vec'], \
+    assert src_data_type in ['text', 'img', 'audio', 'vec', 'lattice'], \
         "Data type not implemented"
-    assert not dynamic_dict or src_data_type == 'text', \
+    assert not dynamic_dict or src_data_type == 'text' or src_data_type == 'lattice', \
         'it is not possible to use dynamic_dict with non-text input'
     fields = {}
 
     fields_getters = {"text": text_fields,
                       "img": image_fields,
                       "audio": audio_fields,
-                      "vec": vec_fields}
+                      "vec": vec_fields,
+                      "lattice": lattice_fields}
 
-    src_field_kwargs = {"n_feats": n_src_feats,
+    ans_field_kwargs = {"n_feats": n_ans_feats,
                         "include_lengths": True,
                         "pad": pad, "bos": None, "eos": None,
-                        "truncate": src_truncate,
-                        "base_name": "src"}
-    fields["src"] = fields_getters[src_data_type](**src_field_kwargs)
+                        "truncate": ans_truncate,
+                        "base_name": "ans"}
+    fields["ans"] = fields_getters["text"](**ans_field_kwargs)
+
+    ques_field_kwargs = {"n_feats": n_ques_feats,
+                        "include_lengths": True,
+                        "pad": pad, "bos": None, "eos": eos,
+                        "truncate": ques_truncate,
+                        "base_name": "ques"}
+    fields["ques"], fields["score"] = fields_getters["lattice"](**ques_field_kwargs)
 
     tgt_field_kwargs = {"n_feats": n_tgt_feats,
                         "include_lengths": False,
@@ -167,9 +207,8 @@ def get_fields(
     if dynamic_dict:
         src_map = Field(
             use_vocab=False, dtype=torch.float,
-            postprocessing=make_src, sequential=False)
+            postprocessing=make_src_confnet, sequential=False)
         fields["src_map"] = src_map
-
         src_ex_vocab = RawField()
         fields["src_ex_vocab"] = src_ex_vocab
 
@@ -287,8 +326,9 @@ def old_style_vocab(vocab):
         _old_style_nesting(vocab)
 
 
-def filter_example(ex, use_src_len=True, use_tgt_len=True,
+def filter_example(ex, use_src_len=True, use_confnet_len=True, use_tgt_len=True,
                    min_src_len=1, max_src_len=float('inf'),
+                   min_confnet_len=1, max_confnet_len=float('inf'),
                    min_tgt_len=1, max_tgt_len=float('inf')):
     """Return whether an example is an acceptable length.
 
@@ -308,11 +348,12 @@ def filter_example(ex, use_src_len=True, use_tgt_len=True,
             will be included).
         max_tgt_len (int or float): Similar to above.
     """
-
-    src_len = len(ex.src[0])
+    ans_len = len(ex.ans[0])
+    ques_len = len(ex.ques[0])
     tgt_len = len(ex.tgt[0])
-    return (not use_src_len or min_src_len <= src_len <= max_src_len) and \
-        (not use_tgt_len or min_tgt_len <= tgt_len <= max_tgt_len)
+    return (not use_src_len or min_src_len <= ans_len <= max_src_len) and \
+            (not use_confnet_len or min_confnet_len <= ques_len <= max_confnet_len) and \
+            (not use_tgt_len or min_tgt_len <= tgt_len <= max_tgt_len)
 
 
 def _pad_vocab_to_multiple(vocab, multiple):
@@ -333,9 +374,27 @@ def _build_field_vocab(field, counter, size_multiple=1, **kwargs):
     ]
     specials = [tok for tok in all_specials if tok is not None]
     field.vocab = field.vocab_cls(counter, specials=specials, **kwargs)
+
     if size_multiple > 1:
         _pad_vocab_to_multiple(field.vocab, size_multiple)
 
+    if hasattr(field, "nesting_field"):
+        #field.nesting_field.vocab = field.nesting_field.vocab_cls(counter, specials=specials, **kwargs)
+
+        #if size_multiple > 1:
+        #    _pad_vocab_to_multiple(field.nesting_field.vocab, size_multiple)
+
+        #field.vocab.extend(field.nesting_field.vocab)
+        #field.vocab.freqs = field.nesting_field.vocab.freqs.copy()
+
+        field.nesting_field.vocab = field.vocab
+        #field.nesting_field.vocab = field.nesting_field.vocab_cls(counter, specials=specials, **kwargs)
+        assert field.nesting_field.vocab == field.vocab, "Nested field vocab not same as nesting field"
+        #_build_nested_field_vocab(field, counter, size_multiple, **kwargs)
+
+
+
+    #if "nesting_field" in field.__dict__.keys():
 
 def _load_vocab(vocab_path, name, counters, min_freq):
     # counters changes in place
@@ -352,6 +411,7 @@ def _load_vocab(vocab_path, name, counters, min_freq):
 def _build_fv_from_multifield(multifield, counters, build_fv_args,
                               size_multiple=1):
     for name, field in multifield:
+        #print('_build_field_vocab of ', name, field)
         _build_field_vocab(
             field,
             counters[name],
@@ -359,14 +419,16 @@ def _build_fv_from_multifield(multifield, counters, build_fv_args,
             **build_fv_args[name])
         logger.info(" * %s vocab size: %d." % (name, len(field.vocab)))
 
-
 def _build_fields_vocab(fields, counters, data_type, share_vocab,
                         vocab_size_multiple,
+                        confnet_vocab_size, confnet_words_min_frequency,
                         src_vocab_size, src_words_min_frequency,
                         tgt_vocab_size, tgt_words_min_frequency):
     build_fv_args = defaultdict(dict)
-    build_fv_args["src"] = dict(
+    build_fv_args["ans"] = dict(
         max_size=src_vocab_size, min_freq=src_words_min_frequency)
+    build_fv_args["ques"] = dict(
+        max_size=confnet_vocab_size, min_freq=confnet_words_min_frequency)
     build_fv_args["tgt"] = dict(
         max_size=tgt_vocab_size, min_freq=tgt_words_min_frequency)
     tgt_multifield = fields["tgt"]
@@ -375,28 +437,38 @@ def _build_fields_vocab(fields, counters, data_type, share_vocab,
         counters,
         build_fv_args,
         size_multiple=vocab_size_multiple if not share_vocab else 1)
-    if data_type == 'text':
-        src_multifield = fields["src"]
+    if data_type == 'text' or data_type == 'lattice':
+        ans_multifield = fields["ans"]
         _build_fv_from_multifield(
-            src_multifield,
+            ans_multifield,
             counters,
             build_fv_args,
             size_multiple=vocab_size_multiple if not share_vocab else 1)
+
+        ques_multifield = fields["ques"]
+        _build_fv_from_multifield(
+            ques_multifield,
+            counters,
+            build_fv_args,
+            size_multiple=vocab_size_multiple if not share_vocab else 1)
+
         if share_vocab:
             # `tgt_vocab_size` is ignored when sharing vocabularies
             logger.info(" * merging src and tgt vocab...")
-            src_field = src_multifield.base_field
+            ans_field = ans_multifield.base_field
+            ques_field = ques_multifield.base_field
             tgt_field = tgt_multifield.base_field
             _merge_field_vocabs(
-                src_field, tgt_field, vocab_size=src_vocab_size,
+                ques_field, ans_field, tgt_field, vocab_size=src_vocab_size,
                 min_freq=src_words_min_frequency,
                 vocab_size_multiple=vocab_size_multiple)
-            logger.info(" * merged vocab size: %d." % len(src_field.vocab))
+            logger.info(" * merged vocab size: %d." % len(ans_field.vocab))
 
     return fields
 
 
 def build_vocab(train_dataset_files, fields, data_type, share_vocab,
+                confnet_vocab_path, confnet_vocab_size, confnet_words_min_frequency,
                 src_vocab_path, src_vocab_size, src_words_min_frequency,
                 tgt_vocab_path, tgt_vocab_size, tgt_words_min_frequency,
                 vocab_size_multiple=1):
@@ -437,9 +509,16 @@ def build_vocab(train_dataset_files, fields, data_type, share_vocab,
             train_dataset_files = []
 
     # Load vocabulary
+    if confnet_vocab_path:
+         confnet_vocab, confnet_vocab_size = _load_vocab(
+            confnet_vocab_path, "ques", counters,
+            confnet_words_min_frequency)
+    else:
+        confnet_vocab = None
+
     if src_vocab_path:
         src_vocab, src_vocab_size = _load_vocab(
-            src_vocab_path, "src", counters,
+            src_vocab_path, "ans", counters,
             src_words_min_frequency)
     else:
         src_vocab = None
@@ -465,7 +544,8 @@ def build_vocab(train_dataset_files, fields, data_type, share_vocab,
                     all_data = getattr(ex, name)
                 for (sub_n, sub_f), fd in zip(
                         f_iter, all_data):
-                    has_vocab = (sub_n == 'src' and src_vocab) or \
+                    has_vocab = (sub_n == 'ans' and src_vocab) or \
+                                (sub_n == 'ques' and confnet_vocab) or \
                                 (sub_n == 'tgt' and tgt_vocab)
                     if sub_f.sequential and not has_vocab:
                         val = fd
@@ -483,20 +563,21 @@ def build_vocab(train_dataset_files, fields, data_type, share_vocab,
     fields = _build_fields_vocab(
         fields, counters, data_type,
         share_vocab, vocab_size_multiple,
+        confnet_vocab_size, confnet_words_min_frequency,
         src_vocab_size, src_words_min_frequency,
         tgt_vocab_size, tgt_words_min_frequency)
 
     return fields  # is the return necessary?
 
 
-def _merge_field_vocabs(src_field, tgt_field, vocab_size, min_freq,
+def _merge_field_vocabs(ques_field, ans_field, tgt_field, vocab_size, min_freq,
                         vocab_size_multiple):
     # in the long run, shouldn't it be possible to do this by calling
     # build_vocab with both the src and tgt data?
     specials = [tgt_field.unk_token, tgt_field.pad_token,
                 tgt_field.init_token, tgt_field.eos_token]
     merged = sum(
-        [src_field.vocab.freqs, tgt_field.vocab.freqs], Counter()
+        [ques_field.vocab.freqs, ans_field.vocab.freqs, tgt_field.vocab.freqs], Counter()
     )
     merged_vocab = Vocab(
         merged, specials=specials,
@@ -504,9 +585,12 @@ def _merge_field_vocabs(src_field, tgt_field, vocab_size, min_freq,
     )
     if vocab_size_multiple > 1:
         _pad_vocab_to_multiple(merged_vocab, vocab_size_multiple)
-    src_field.vocab = merged_vocab
+    ques_field.vocab = merged_vocab
+    if hasattr(ques_field, "nesting_field"):
+        ques_field.nesting_field.vocab = merged_vocab
     tgt_field.vocab = merged_vocab
-    assert len(src_field.vocab) == len(tgt_field.vocab)
+    ans_field.vocab = merged_vocab
+    assert len(ques_field.vocab) == len(ans_field.vocab) == len(tgt_field.vocab)
 
 
 def _read_vocab_file(vocab_path, tag):
@@ -762,6 +846,9 @@ class DatasetLazyIter(object):
         )
         for batch in cur_iter:
             self.dataset = cur_iter.dataset
+            #print('batch ques ', batch.ques)
+            #print('batch ans', batch.ans)
+            #print('batch src map ', batch.src_map)
             yield batch
 
         # NOTE: This is causing some issues for consumer/producer,
@@ -802,18 +889,21 @@ def max_tok_len(new, count, sofar):
     in a batch <= batch_size
     """
     # Maintains the longest src and tgt length in the current batch
-    global max_src_in_batch, max_tgt_in_batch  # this is a hack
+    global max_ques_in_batch, max_ans_in_batch, max_tgt_in_batch  # this is a hack
     # Reset current longest length at a new batch (count=1)
     if count == 1:
-        max_src_in_batch = 0
+        max_ans_in_batch = 0
         max_tgt_in_batch = 0
+        max_ques_in_batch = 0
     # Src: [<bos> w1 ... wN <eos>]
-    max_src_in_batch = max(max_src_in_batch, len(new.src[0]) + 2)
+    max_ans_in_batch = max(max_ans_in_batch, len(new.ans[0]) + 2)
+    max_ques_in_batch = max(max_ques_in_batch, len(new.ques[0]) + 2)
     # Tgt: [w1 ... wM <eos>]
     max_tgt_in_batch = max(max_tgt_in_batch, len(new.tgt[0]) + 1)
-    src_elements = count * max_src_in_batch
+    ques_elements = count * max_ques_in_batch
+    ans_elements = count * max_ans_in_batch
     tgt_elements = count * max_tgt_in_batch
-    return max(src_elements, tgt_elements)
+    return max(ques_elements, ans_elements, tgt_elements)
 
 
 def build_dataset_iter(corpus_type, fields, opt, is_train=True, multi=False):

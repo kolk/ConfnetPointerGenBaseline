@@ -105,7 +105,8 @@ class Translator(object):
             self,
             model,
             fields,
-            src_reader,
+            ques_reader,
+            ans_reader,
             tgt_reader,
             gpu=-1,
             n_best=1,
@@ -161,7 +162,9 @@ class Translator(object):
         self.ignore_when_blocking = ignore_when_blocking
         self._exclusion_idxs = {
             self._tgt_vocab.stoi[t] for t in self.ignore_when_blocking}
-        self.src_reader = src_reader
+
+        self.ques_reader = ques_reader
+        self.ans_reader = ans_reader
         self.tgt_reader = tgt_reader
         self.replace_unk = replace_unk
         if self.replace_unk and not self.model.decoder.attentional:
@@ -229,12 +232,14 @@ class Translator(object):
             logger (logging.Logger or NoneType): See :func:`__init__()`.
         """
 
-        src_reader = inputters.str2reader[opt.data_type].from_opt(opt)
+        ans_reader = inputters.str2reader["text"].from_opt(opt)
+        ques_reader = inputters.str2reader[opt.data_type].from_opt(opt)
         tgt_reader = inputters.str2reader["text"].from_opt(opt)
         return cls(
             model,
             fields,
-            src_reader,
+            ques_reader,
+            ans_reader,
             tgt_reader,
             gpu=opt.gpu,
             n_best=opt.n_best,
@@ -280,7 +285,8 @@ class Translator(object):
 
     def translate(
             self,
-            src,
+            ques,
+            ans,
             tgt=None,
             src_dir=None,
             batch_size=None,
@@ -310,10 +316,11 @@ class Translator(object):
         if batch_size is None:
             raise ValueError("batch_size must be set")
 
-        src_data = {"reader": self.src_reader, "data": src, "dir": src_dir}
+        ques_data = {"reader":self.ques_reader, "data":ques, "dir":None}
+        ans_data = {"reader": self.ans_reader, "data": ans, "dir": None}
         tgt_data = {"reader": self.tgt_reader, "data": tgt, "dir": None}
         _readers, _data, _dir = inputters.Dataset.config(
-            [('src', src_data), ('tgt', tgt_data)])
+            [('ques', ques_data), ('ans', ans_data), ('tgt', tgt_data)])
 
         data = inputters.Dataset(
             self.fields, readers=_readers, data=_data, dirs=_dir,
@@ -486,7 +493,7 @@ class Translator(object):
 
         # (2) Repeat src objects `n_best` times.
         # We use batch_size x n_best, get ``(src_len, batch * n_best, nfeat)``
-        src = tile(src, n_best, dim=1)
+        src = tile(src, n_best, dim=2)
         enc_states = tile(enc_states, n_best, dim=1)
         if isinstance(memory_bank, tuple):
             memory_bank = tuple(tile(x, n_best, dim=1) for x in memory_bank)
@@ -547,11 +554,34 @@ class Translator(object):
                                                        decode_strategy)
 
     def _run_encoder(self, batch):
-        src, src_lengths = batch.src if isinstance(batch.src, tuple) \
-                           else (batch.src, None)
+        ans, ans_lengths = batch.ans if isinstance(batch.ans, tuple) \
+                           else (batch.ans, None)
+        ques, ques_lengths, max_par_acr_size = batch.ques if isinstance(batch.ques, tuple) \
+                           else (batch.ques, None)
+        scores, score_lengths, max_par_acr_size_ = batch.score if isinstance(batch.score, tuple) \
+                           else (batch.score, None)
 
-        enc_states, memory_bank, src_lengths = self.model.encoder(
-            src, src_lengths)
+        #ans_states, ans_memory_bank, ans_lengths = self.model.ans_encoder(
+        #    ans, ans_lengths)
+        ans_lens_sorted, idx = torch.sort(ans_lengths, descending=True)
+        ans_sorted = ans[:, idx, :]
+        ans_enc_state_, ans_memory_bank_, ans_lengths_sorted = self.model.ans_encoder(ans_sorted, ans_lens_sorted)
+        rev_indx = [(idx == i).nonzero().item() for i in range(len(ans_lens_sorted))]
+        ans_states = tuple(enc_ans[:, rev_indx, :] for enc_ans in ans_enc_state_)
+        ans_memory_bank = ans_memory_bank_[:, rev_indx, :]
+
+
+        ques_states, ques_memory_bank, ques_lengths = self.model.ques_encoder(
+            ques, scores, ques_lengths, max_par_acr_size)
+
+        enc_states = tuple(torch.add(enc_q, enc_ans) for enc_q, enc_ans in zip(ques_states, ans_states))
+        memory_bank = torch.cat([ques_memory_bank, ans_memory_bank], 0)
+        src_lengths = torch.add(ques_lengths, ans_lengths)
+        #src = torch.tensor(ques + [[w] for w in ans])
+        ######33 hack #########
+        src=ans
+        #####################
+
         if src_lengths is None:
             assert not isinstance(memory_bank, tuple), \
                 'Ensemble decoding only supported for text data'

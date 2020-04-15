@@ -70,7 +70,7 @@ def main(opt, device_id, batch_queue=None, semaphore=None):
         fields = vocab
 
     # Report src and tgt vocab sizes, including for features
-    for side in ['src', 'tgt']:
+    for side in ['ques', 'ans', 'score', 'tgt']:
         f = fields[side]
         try:
             f_iter = iter(f)
@@ -95,7 +95,7 @@ def main(opt, device_id, batch_queue=None, semaphore=None):
     model_saver = build_model_saver(model_opt, opt, model, fields, optim)
 
     trainer = build_trainer(
-        opt, device_id, model, fields, optim, model_saver=model_saver)
+        opt, device_id, model, fields, optim, model_saver=model_saver, vocab=vocab)
 
     if batch_queue is None:
         if len(opt.data_ids) > 1:

@@ -21,13 +21,13 @@ class Elementwise(nn.ModuleList):
         super(Elementwise, self).__init__(*args)
 
     def forward(self, inputs):
-        inputs_ = [feat.squeeze(2) for feat in inputs.split(1, dim=2)]
+        inputs_ = [feat.squeeze(2) for feat in inputs.split(1, dim=len(inputs.size())-1)]
         assert len(self) == len(inputs_)
         outputs = [f(x) for f, x in zip(self, inputs_)]
         if self.merge == 'first':
             return outputs[0]
         elif self.merge == 'concat' or self.merge == 'mlp':
-            return torch.cat(outputs, 2)
+            return torch.cat(outputs, len(outputs[0].size())-1)
         elif self.merge == 'sum':
             return sum(outputs)
         else:

@@ -16,7 +16,7 @@ import onmt.utils
 from onmt.utils.logging import logger
 
 
-def build_trainer(opt, device_id, model, fields, optim, model_saver=None):
+def build_trainer(opt, device_id, model, fields, optim, model_saver=None, vocab=None):
     """
     Simplify `Trainer` creation based on user `opt`s*
 
@@ -32,6 +32,8 @@ def build_trainer(opt, device_id, model, fields, optim, model_saver=None):
     """
 
     tgt_field = dict(fields)["tgt"].base_field
+    ques_field = dict(fields)["ques"].base_field
+    ans_field = dict(fields)["ans"].base_field
     train_loss = onmt.utils.loss.build_loss_compute(model, tgt_field, opt)
     valid_loss = onmt.utils.loss.build_loss_compute(
         model, tgt_field, opt, train=False)
@@ -70,7 +72,8 @@ def build_trainer(opt, device_id, model, fields, optim, model_saver=None):
                            model_dtype=opt.model_dtype,
                            earlystopper=earlystopper,
                            dropout=dropout,
-                           dropout_steps=dropout_steps)
+                           dropout_steps=dropout_steps,
+                           vocab=vocab)
     return trainer
 
 
@@ -107,7 +110,7 @@ class Trainer(object):
                  n_gpu=1, gpu_rank=1, gpu_verbose_level=0,
                  report_manager=None, with_align=False, model_saver=None,
                  average_decay=0, average_every=1, model_dtype='fp32',
-                 earlystopper=None, dropout=[0.3], dropout_steps=[0]):
+                 earlystopper=None, dropout=[0.3], dropout_steps=[0], vocab=None):
         # Basic attributes.
         self.model = model
         self.train_loss = train_loss
@@ -132,6 +135,7 @@ class Trainer(object):
         self.earlystopper = earlystopper
         self.dropout = dropout
         self.dropout_steps = dropout_steps
+        self.vocab = vocab
 
         for i in range(len(self.accum_count_l)):
             assert self.accum_count_l[i] > 0
@@ -161,6 +165,8 @@ class Trainer(object):
         normalization = 0
         self.accum_count = self._accum_count(self.optim.training_step)
         for batch in iterator:
+            #print("batch")
+            #print(batch.__dict__)
             batches.append(batch)
             if self.norm_method == "tokens":
                 num_tokens = batch.tgt[1:, :, 0].ne(
@@ -309,16 +315,21 @@ class Trainer(object):
             stats = onmt.utils.Statistics()
 
             for batch in valid_iter:
-                src, src_lengths = batch.src if isinstance(batch.src, tuple) \
-                                   else (batch.src, None)
+                ques, ques_lengths, par_arc_lengths = batch.ques if isinstance(batch.ques, tuple) \
+                    else (batch.ques, None, None)
+                ques_scores, ques_score_lengths, par_arc_lengths_ = batch.score if isinstance(batch.score, tuple) \
+                    else (batch.score, None)
+                # print('ques_lengths', ques_lengths)
+                ans, ans_lengths = batch.ans if isinstance(batch.ans, tuple) \
+                                   else (batch.ans, None)
                 tgt = batch.tgt
 
                 # F-prop through the model.
-                outputs, attns = valid_model(src, tgt, src_lengths,
-                                             with_align=self.with_align)
+                outputs, attns = valid_model(batch, ques, ques_scores, ans, tgt, ques_lengths, par_arc_lengths,
+                                             ans_lengths, with_align=self.with_align)
 
                 # Compute loss.
-                _, batch_stats = self.valid_loss(batch, outputs, attns)
+                _, batch_stats = self.valid_loss(batch, outputs, attns, train=False)
 
                 # Update statistics.
                 stats.update(batch_stats)
@@ -345,11 +356,25 @@ class Trainer(object):
             else:
                 trunc_size = target_size
 
-            src, src_lengths = batch.src if isinstance(batch.src, tuple) \
-                else (batch.src, None)
-            if src_lengths is not None:
-                report_stats.n_src_words += src_lengths.sum().item()
-
+            ques, ques_lengths, par_arc_lengths = batch.ques if isinstance(batch.ques, tuple) \
+                else (batch.ques, None)
+            ques_scores, ques_score_lengths, par_arc_lengths_ = batch.score if isinstance(batch.score, tuple) \
+                else (batch.score, None)
+            #print('ques_lengths', ques_lengths)
+            #print('ques_score_lengths', ques_score_lengths)
+            assert torch.all(torch.eq(ques_lengths.type(torch.LongTensor), ques_score_lengths.type(torch.LongTensor))), "Confnet arc and score lengths not same"
+            #print('par_arc_lengths', par_arc_lengths)
+            #print('par_arc_lengths_', par_arc_lengths_)
+            assert torch.all(torch.eq(par_arc_lengths.type(torch.LongTensor), par_arc_lengths_.type(torch.LongTensor))), "Confnet parallel arc lengths not same"
+            ans, ans_lengths = batch.ans if isinstance(batch.ans, tuple) \
+                else (batch.ans, None)
+            #print("ques_lengths is not None", ques_lengths is not None)
+            #print("ans_lengths is not None", ans_lengths is not None)
+            if ques_lengths is not None:
+                report_stats.n_src_words += ques_lengths.sum().item()
+            if ans_lengths is not None:
+                report_stats.n_src_words += ans_lengths.sum().item()
+            #print('report_stats.n_src_words', report_stats.n_src_words)
             tgt_outer = batch.tgt
 
             bptt = False
@@ -361,8 +386,24 @@ class Trainer(object):
                 if self.accum_count == 1:
                     self.optim.zero_grad()
 
-                outputs, attns = self.model(src, tgt, src_lengths, bptt=bptt,
-                                            with_align=self.with_align)
+                """
+                ####################
+                for sent in zip(ques.squeeze(-1)):
+                    for par_arc in sent[0]:
+                        print([self.vocab["ques"].base_field.vocab.itos[w.item()] for w in par_arc])
+                    print('&&&&&&&&&&&&&&&&&&')
+
+                for sent in zip(ans.permute(1,0,2).squeeze(-1)):
+                    print([self.vocab["ans"].base_field.vocab.itos[w.item()] for w in sent[0]])
+                    print('###################')
+
+                for sent in zip(tgt.permute(1,0,2).squeeze(-1)):
+                    print([self.vocab["ques"].base_field.vocab.itos[w.item()] for w in sent[0]])
+                    print('^^^^^^^^^^^^^^^^^^')
+                """
+
+                outputs, attns = self.model(batch, ques, ques_scores, ans, tgt, ques_lengths, par_arc_lengths, ans_lengths,
+                                            bptt=bptt, with_align=self.with_align)
                 bptt = True
 
                 # 3. Compute loss.
@@ -374,7 +415,9 @@ class Trainer(object):
                         normalization=normalization,
                         shard_size=self.shard_size,
                         trunc_start=j,
-                        trunc_size=trunc_size)
+                        trunc_size=trunc_size,
+                        vocab=self.vocab,
+                        train=True)
 
                     if loss is not None:
                         self.optim.backward(loss)
