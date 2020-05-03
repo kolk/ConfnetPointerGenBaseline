@@ -76,6 +76,4 @@ Major contributors are:
 [Dylan Flaute](http://github.com/flauted (University of Dayton)
 and more !
 
-OpenNMT-py belongs to the OpenNMT project along with OpenNMT-Lua and OpenNMT-tf.
-
 ## Citation
