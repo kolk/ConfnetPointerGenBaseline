@@ -1,16 +1,16 @@
 # Full length Answer Generation from Spoken Questions
 # Based on OpenNMT-py: Open-Source Neural Machine Translation
 
+Code base for paper.The dataset is contained in data directory. train.ques, train.ans, train.tgt contains data triplet (question, factoid answer, target full length answer) in each line respectively.
 
-This is a [PyTorch](https://github.com/pytorch/pytorch)
-port of [OpenNMT](https://github.com/OpenNMT/OpenNMT),
-an open-source (MIT) neural machine translation system. It is designed to be research friendly to try out new ideas in translation, summary, image-to-text, morphology, and many other domains. Some companies have proven the code to be production ready.
-
-<center style="padding: 40px"><img width="70%" src="http://opennmt.github.io/simple-attn.png" /></center>
+The codebase is built over [OpenNMT](https://github.com/OpenNMT/OpenNMT)
 
 ## Requirements
+All dependencies can be installed via:
 
-
+```bash
+pip install -r requirements.txt
+```
 ### Step 1a: Add padding:
 Pad the answer text file.
 ```
@@ -55,12 +55,8 @@ onmt_train -data data/demo -save_model demo-model -word_vec_size 300 -model_type
 ### Step 3: Translate
 
 ```bash
-onmt_translate -model demo-model_acc_XX.XX_ppl_XXX.XX_eX.pt -ques data/ques-test.txt -ans data/ans-test.txt -output pred.txt -replace_unk -verbose
+onmt_translate -model demo-model_acc_XX.XX_ppl_XXX.XX_eX.pt -ques data/ques-test.txt -ans data/ans-test.txt -output pred.txt -replace_unk -verbose -beam 5
 ```
-
-## Pretrained embeddings (e.g. GloVe)
-
-Please see the FAQ: [How to use GloVe pre-trained embeddings in OpenNMT-py](http://opennmt.net/OpenNMT-py/FAQ.html#how-do-i-use-pretrained-embeddings-e-g-glove)
 
 ## Acknowledgements
 
@@ -83,22 +79,3 @@ and more !
 OpenNMT-py belongs to the OpenNMT project along with OpenNMT-Lua and OpenNMT-tf.
 
 ## Citation
-
-[OpenNMT: Neural Machine Translation Toolkit](https://arxiv.org/pdf/1805.11462)
-
-[OpenNMT technical report](https://doi.org/10.18653/v1/P17-4012)
-
-```
-@inproceedings{opennmt,
-  author    = {Guillaume Klein and
-               Yoon Kim and
-               Yuntian Deng and
-               Jean Senellart and
-               Alexander M. Rush},
-  title     = {Open{NMT}: Open-Source Toolkit for Neural Machine Translation},
-  booktitle = {Proc. ACL},
-  year      = {2017},
-  url       = {https://doi.org/10.18653/v1/P17-4012},
-  doi       = {10.18653/v1/P17-4012}
-}
-```
