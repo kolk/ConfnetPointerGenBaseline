@@ -1,7 +1,7 @@
 # Full length Answer Generation from Spoken Questions
 # Based on OpenNMT-py: Open-Source Neural Machine Translation
 
-Code base for paper.The dataset is contained in data directory. train.ques, train.ans, train.tgt contains data triplet (question, factoid answer, target full length answer) in each line respectively.
+Code base for paper "ConfNet2Seq: Full Length Answer Generation from Spoken Questions". The dataset is contained in data directory. train.ques, train.ans, train.tgt contains data triplet (question, factoid answer, target full length answer) in each line respectively.
 
 The codebase is built over [OpenNMT](https://github.com/OpenNMT/OpenNMT)
 
@@ -20,7 +20,7 @@ python add_padding.py --input <answer-filename> --output <padded-answer-filename
 ### Step 1: Preprocess the data
 
 ```bash
-onmt_preprocess -train_ques data/ques-train.txt -train_ans data/ans-train.txt -train_tgt data/tgt-train.txt -valid_ques data/ques-val.txt -valid_ans data/ans-val.txt -valid_tgt data/tgt-val.txt -save_data data/demo --dynamic_dict --share_vocab
+python preprocess.py -train_ques data/ques-train.txt -train_ans data/ans-train.txt -train_tgt data/tgt-train.txt -valid_ques data/ques-val.txt -valid_ans data/ans-val.txt -valid_tgt data/tgt-val.txt -save_data data/demo --dynamic_dict --share_vocab
 ```
 
 The data consists of parallel source (`src`) and target (`tgt`) data containing one sentence per line with tokens separated by a space:
@@ -47,7 +47,7 @@ Internally the system never touches the words themselves, but uses these indices
 ### Step 2: Train the model
 
 ```bash
-onmt_train -data data/demo -save_model demo-model -word_vec_size 300 -model_type lattice -encoder_type brnn -layers 2 -rnn_size 512 \
+python train.py -data data/demo -save_model demo-model -word_vec_size 300 -model_type lattice -encoder_type brnn -layers 2 -rnn_size 512 \
 -data data/demo -batch_size 32 -valid_batch_size 32 -valid_steps 2500 -dropout 0.5 -start_decay_steps 10000 -coverage_attn -copy_attn \
 --share_embeddings
 ```
@@ -55,7 +55,7 @@ onmt_train -data data/demo -save_model demo-model -word_vec_size 300 -model_type
 ### Step 3: Translate
 
 ```bash
-onmt_translate -model demo-model_acc_XX.XX_ppl_XXX.XX_eX.pt -ques data/ques-test.txt -ans data/ans-test.txt -output pred.txt -replace_unk -verbose -beam 5
+python translate.py -model demo-model_acc_XX.XX_ppl_XXX.XX_eX.pt -ques data/ques-test.txt -ans data/ans-test.txt -ans data/ans-test.txt -output pred.txt -replace_unk -verbose -beam 5
 ```
 
 ## Acknowledgements
@@ -63,17 +63,5 @@ onmt_translate -model demo-model_acc_XX.XX_ppl_XXX.XX_eX.pt -ques data/ques-test
 OpenNMT-py is run as a collaborative open-source project.
 The original code was written by [Adam Lerer](http://github.com/adamlerer) (NYC) to reproduce OpenNMT-Lua using Pytorch.
 
-Major contributors are:
-[Sasha Rush](https://github.com/srush) (Cambridge, MA)
-[Vincent Nguyen](https://github.com/vince62s) (Ubiqus)
-[Ben Peters](http://github.com/bpopeters) (Lisbon)
-[Sebastian Gehrmann](https://github.com/sebastianGehrmann) (Harvard NLP)
-[Yuntian Deng](https://github.com/da03) (Harvard NLP)
-[Guillaume Klein](https://github.com/guillaumekln) (Systran)
-[Paul Tardy](https://github.com/pltrdy) (Ubiqus / Lium)
-[François Hernandez](https://github.com/francoishernandez) (Ubiqus)
-[Jianyu Zhan](http://github.com/jianyuzhan) (Shanghai)
-[Dylan Flaute](http://github.com/flauted (University of Dayton)
-and more !
-
 ## Citation
+
