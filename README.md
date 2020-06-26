@@ -1,4 +1,4 @@
-# Full length Answer Generation from Spoken Questions
+# ConfNet2Seq: Full length Answer Generation from Spoken Questions
 # Based on OpenNMT-py: Open-Source Neural Machine Translation
 
 Code base for paper "ConfNet2Seq: Full Length Answer Generation from Spoken Questions". The dataset is contained in data directory. train.ques, train.ans, train.tgt contains data triplet (question, factoid answer, target full length answer) in each line respectively.
@@ -20,7 +20,7 @@ python add_padding.py --input <answer-filename> --output <padded-answer-filename
 ### Step 1: Preprocess the data
 
 ```bash
-python preprocess.py -train_ques data/ques-train.txt -train_ans data/ans-train.txt -train_tgt data/tgt-train.txt -valid_ques data/ques-val.txt -valid_ans data/ans-val.txt -valid_tgt data/tgt-val.txt -save_data data/demo --dynamic_dict --share_vocab
+python preprocess.py -train_confnet data/ques-train.txt -train_src data/ans-train.txt -train_tgt data/tgt-train.txt -valid_confnet data/ques-val.txt -valid_src data/ans-val.txt -valid_tgt data/tgt-val.txt -save_data data/demo --dynamic_dict --share_vocab
 ```
 
 The data consists of parallel source (`src`) and target (`tgt`) data containing one sentence per line with tokens separated by a space:
@@ -55,13 +55,28 @@ python train.py -data data/demo -save_model demo-model -word_vec_size 300 -model
 ### Step 3: Translate
 
 ```bash
-python translate.py -model demo-model_acc_XX.XX_ppl_XXX.XX_eX.pt -ques data/ques-test.txt -ans data/ans-test.txt -ans data/ans-test.txt -output pred.txt -replace_unk -verbose -beam 5
+python translate.py -model <model_path> --data_type lattice -src  data/ans-test.txt -confnet data/ques-test.txt -tgt data/tgt-test.txt -share_vocab -beam_size 10 -replace_unk -output pred.txt --batch_size 10
+```
+### To list all run options:
+```bash
+python preprocess.py --help
+python train.py --help
+python translate.py --help
 ```
 
 ## Acknowledgements
 
 OpenNMT-py is run as a collaborative open-source project.
-The original code was written by [Adam Lerer](http://github.com/adamlerer) (NYC) to reproduce OpenNMT-Lua using Pytorch.
+The original OpenNMT-py code was written by [Adam Lerer](http://github.com/adamlerer) (NYC) to reproduce OpenNMT-Lua using Pytorch.
 
 ## Citation
-
+```bash
+@misc{pal2020confnet2seq,
+    title={ConfNet2Seq: Full Length Answer Generation from Spoken Questions},
+    author={Vaishali Pal and Manish Shrivastava and Laurent Besacier},
+    year={2020},
+    eprint={2006.05163},
+    archivePrefix={arXiv},
+    primaryClass={cs.CL}
+}
+```
