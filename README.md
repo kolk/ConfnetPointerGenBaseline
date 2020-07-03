@@ -71,12 +71,11 @@ The original OpenNMT-py code was written by [Adam Lerer](http://github.com/adaml
 
 ## Citation
 ```bash
-@misc{pal2020confnet2seq,
+@inproceedings{pal2020confnet2seq,
     title={ConfNet2Seq: Full Length Answer Generation from Spoken Questions},
     author={Vaishali Pal and Manish Shrivastava and Laurent Besacier},
+    booktitle={Proceedings of the 23rd International Conference on Text, Speech and Dialogue (TSD 2020)},
     year={2020},
-    eprint={2006.05163},
-    archivePrefix={arXiv},
-    primaryClass={cs.CL}
+    publisher = {Springer}
 }
 ```
