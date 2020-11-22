@@ -2,6 +2,9 @@ The confusion network can directories can be found at https://drive.google.com/d
 
 
 
-> python preprocess.py -train_src data/src-train.txt -train_tgt data/tgt-train.txt -valid_src data/src-val.txt -valid_tgt data/tgt-val.txt -save_data data/data -src_vocab_size 1000 -tgt_vocab_size 1000
+> python preprocess.py -train_confnet data/ques-train.txt -train_src data/ans-train.txt -train_tgt data/tgt-train.txt -valid_confnet data/ques-val.txt -valid_src data/ans-val.txt -valid_tgt data/tgt-val.txt -save_data data/demo --dynamic_dict --share_vocab
 
-> python train.py -data data/data -save_model /n/rush_lab/data/tmp_ -world_size 1 -gpu_ranks 0 -rnn_size 100 -word_vec_size 50 -layers 1 -train_steps 100 -optim adam  -learning_rate 0.001
+
+> python train.py -data data/demo -save_model demo-model -word_vec_size 300 -model_type lattice -encoder_type brnn -layers 2 -rnn_size 512 \
+-data data/demo -batch_size 32 -valid_batch_size 32 -valid_steps 2500 -dropout 0.5 -start_decay_steps 10000 -coverage_attn -copy_attn \
+--share_embeddings
