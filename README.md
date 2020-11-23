@@ -3,6 +3,8 @@
 
 Code base for paper "ConfNet2Seq: Full Length Answer Generation from Spoken Questions". The dataset is contained in data directory. train.ques, train.ans, train.tgt contains data triplet (question, factoid answer, target full length answer) in each line respectively.
 
+![alt text](https://github.com/kolk/ConfnetPointerGenBaseline/blob/master/baseline_confnet_pgen2.png?raw=true)
+
 The codebase is built over [OpenNMT](https://github.com/OpenNMT/OpenNMT)
 
 ## Requirements
