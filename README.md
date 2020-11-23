@@ -10,6 +10,9 @@ All dependencies can be installed via:
 
 ```bash
 pip install -r requirements.txt
+
+The data files are present in data directory. The confusion network can be downloaded from https://drive.google.com/drive/folders/1nFtsOrSdE5v6Bjsw-B90MBYWvVtFBsYr?usp=sharing
+
 ```
 ### Step 1a: Add padding:
 Pad the answer text file.
